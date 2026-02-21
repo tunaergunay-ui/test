@@ -46,17 +46,19 @@ class IAMSService:
         EngagementState.FOLLOW_UP,
     }
     MAX_TIMELINE_PAGE_LIMIT = 200
-    EMITTED_AUDIT_EVENT_TYPES = {
-        "RISK_CREATED",
-        "RISK_SCORED",
-        "ENGAGEMENT_CREATED",
-        "ENGAGEMENT_TRANSITIONED",
-        "FINDING_CREATED",
-        "FINDING_TRANSITIONED",
-        "FINDING_ACTION_PLAN_ASSIGNED",
-        "FINDING_DUE_DATE_RESCHEDULED",
-        "FINDING_OVERDUE",
-    }
+    EMITTED_AUDIT_EVENT_TYPES = frozenset(
+        {
+            "RISK_CREATED",
+            "RISK_SCORED",
+            "ENGAGEMENT_CREATED",
+            "ENGAGEMENT_TRANSITIONED",
+            "FINDING_CREATED",
+            "FINDING_TRANSITIONED",
+            "FINDING_ACTION_PLAN_ASSIGNED",
+            "FINDING_DUE_DATE_RESCHEDULED",
+            "FINDING_OVERDUE",
+        }
+    )
     ALLOWED_TIMELINE_EVENT_TYPES = EMITTED_AUDIT_EVENT_TYPES
 
     def __init__(self, now_provider: Callable[[], datetime] | None = None) -> None:
@@ -69,9 +71,13 @@ class IAMSService:
     def _now(self) -> datetime:
         return self._now_provider()
 
+    @classmethod
+    def get_allowed_timeline_event_types(cls) -> List[str]:
+        return sorted(cls.ALLOWED_TIMELINE_EVENT_TYPES)
+
     def _append_event(self, event_type: str, aggregate_id: str, actor_id: str) -> ImmutableAuditEvent:
         if event_type not in self.EMITTED_AUDIT_EVENT_TYPES:
-            allowed = ", ".join(sorted(self.EMITTED_AUDIT_EVENT_TYPES))
+            allowed = ", ".join(self.get_allowed_timeline_event_types())
             raise ValidationError(f"event_type must be one of: {allowed}")
         event = ImmutableAuditEvent(
             event_id=f"evt-{len(self.audit_events)+1}",
@@ -343,7 +349,7 @@ class IAMSService:
         if not normalized_event_type:
             raise ValidationError("event_type cannot be blank when provided")
         if normalized_event_type not in cls.ALLOWED_TIMELINE_EVENT_TYPES:
-            allowed = ", ".join(sorted(cls.ALLOWED_TIMELINE_EVENT_TYPES))
+            allowed = ", ".join(cls.get_allowed_timeline_event_types())
             raise ValidationError(f"event_type must be one of: {allowed}")
         return normalized_event_type
 

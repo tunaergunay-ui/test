@@ -464,6 +464,11 @@ class IAMSServiceTests(unittest.TestCase):
                 limit=self.svc.MAX_TIMELINE_PAGE_LIMIT + 1,
             )
 
+    def test_allowed_timeline_event_types_are_sorted_and_stable(self):
+        allowed = self.svc.get_allowed_timeline_event_types()
+        self.assertEqual(allowed, sorted(allowed))
+        self.assertIn("FINDING_CREATED", allowed)
+
     def test_append_event_rejects_unknown_event_type(self):
         with self.assertRaises(ValidationError):
             self.svc._append_event("UNKNOWN_EVENT", "agg-1", "u-system")
