@@ -322,6 +322,8 @@ class IAMSService:
     def _normalize_event_type(event_type: str | None) -> str | None:
         if event_type is None:
             return None
+        if not isinstance(event_type, str):
+            raise ValidationError("event_type must be a string when provided")
         normalized_event_type = event_type.strip()
         if not normalized_event_type:
             raise ValidationError("event_type cannot be blank when provided")
