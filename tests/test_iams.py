@@ -464,6 +464,10 @@ class IAMSServiceTests(unittest.TestCase):
                 limit=self.svc.MAX_TIMELINE_PAGE_LIMIT + 1,
             )
 
+    def test_append_event_rejects_unknown_event_type(self):
+        with self.assertRaises(ValidationError):
+            self.svc._append_event("UNKNOWN_EVENT", "agg-1", "u-system")
+
     def test_audit_event_timestamp_uses_time_provider(self):
         self.svc.create_engagement(Engagement("eng-time", "ent-1", "u-aud", Role.AUDITOR))
         self.assertEqual(self.svc.audit_events[-1].occurred_at, self.fixed_now)
