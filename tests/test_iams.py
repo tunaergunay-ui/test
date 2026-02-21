@@ -351,6 +351,37 @@ class IAMSServiceTests(unittest.TestCase):
         self.assertEqual(len(paged), 2)
         self.assertTrue(all(e["event_type"] == "FINDING_TRANSITIONED" for e in paged))
 
+
+    def test_finding_timeline_supports_time_window_filters(self):
+        self._create_active_engagement("eng-tlw")
+        self.svc.create_finding(Finding("f-tlw", "eng-tlw", "u-aud", Role.AUDITOR, "Medium", self.fixed_now + timedelta(days=10)))
+
+        self.fixed_now = self.fixed_now + timedelta(minutes=5)
+        self.svc.transition_finding("f-tlw", FindingState.VALIDATED, "u-mgr", Role.AUDIT_MANAGER)
+
+        self.fixed_now = self.fixed_now + timedelta(minutes=5)
+        self.svc.transition_finding("f-tlw", FindingState.AGREED_ACTION, "u-mgr", Role.AUDIT_MANAGER)
+
+        lower_bound = datetime.fromisoformat(self.svc.get_finding_timeline("f-tlw")[1]["occurred_at"])
+        upper_bound = datetime.fromisoformat(self.svc.get_finding_timeline("f-tlw")[2]["occurred_at"])
+
+        filtered = self.svc.get_finding_timeline(
+            "f-tlw",
+            occurred_after=lower_bound,
+            occurred_before=upper_bound,
+        )
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(all(item["event_type"] == "FINDING_TRANSITIONED" for item in filtered))
+
+        page = self.svc.get_finding_timeline_page(
+            "f-tlw",
+            occurred_after=lower_bound,
+            occurred_before=upper_bound,
+        )
+        self.assertEqual(page["occurred_after"], lower_bound.isoformat())
+        self.assertEqual(page["occurred_before"], upper_bound.isoformat())
+        self.assertEqual(page["total"], 2)
+
     def test_finding_timeline_rejects_invalid_filters(self):
         self._create_active_engagement("eng-tlv")
         self.svc.create_finding(Finding("f-tlv", "eng-tlv", "u-aud", Role.AUDITOR, "Low", self.fixed_now + timedelta(days=10)))
@@ -375,6 +406,19 @@ class IAMSServiceTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             self.svc.get_finding_timeline("f-tlv", offset=-1)
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline("f-tlv", occurred_after="bad")
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline_page("f-tlv", occurred_before=123)
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline(
+                "f-tlv",
+                occurred_after=self.fixed_now + timedelta(hours=1),
+                occurred_before=self.fixed_now,
+            )
 
 
     def test_finding_timeline_normalizes_event_type_and_limit_type(self):

@@ -454,13 +454,38 @@ class IAMSService:
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValidationError("offset must be a non-negative integer")
 
-    def _get_filtered_finding_events(self, finding_id: str, event_type: str | None) -> tuple[List[ImmutableAuditEvent], str | None]:
+    @staticmethod
+    def _validate_time_window(
+        occurred_after: datetime | None,
+        occurred_before: datetime | None,
+    ) -> None:
+        if occurred_after is not None and not isinstance(occurred_after, datetime):
+            raise ValidationError("occurred_after must be a datetime when provided")
+        if occurred_before is not None and not isinstance(occurred_before, datetime):
+            raise ValidationError("occurred_before must be a datetime when provided")
+        if occurred_after is not None and occurred_before is not None and occurred_after > occurred_before:
+            raise ValidationError("occurred_after cannot be later than occurred_before")
+
+    def _get_filtered_finding_events(
+        self,
+        finding_id: str,
+        event_type: str | None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
+    ) -> tuple[List[ImmutableAuditEvent], str | None]:
         if finding_id not in self.findings:
             raise NotFoundError(f"finding_id not found: {finding_id}")
 
         normalized_event_type = self._normalize_event_type(event_type)
+        self._validate_time_window(occurred_after=occurred_after, occurred_before=occurred_before)
+
         events = [e for e in self.audit_events if e.aggregate_id == finding_id]
         events.sort(key=lambda e: (e.occurred_at, e.event_id))
+
+        if occurred_after is not None:
+            events = [e for e in events if e.occurred_at >= occurred_after]
+        if occurred_before is not None:
+            events = [e for e in events if e.occurred_at <= occurred_before]
 
         if normalized_event_type is None:
             return events, None
@@ -482,12 +507,19 @@ class IAMSService:
         limit: int | None = None,
         offset: int = 0,
         sort_order: str = "asc",
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
     ) -> List[dict]:
         self._validate_limit(limit)
         self._validate_offset(offset)
         normalized_sort_order = self._normalize_sort_order(sort_order)
 
-        events, _ = self._get_filtered_finding_events(finding_id=finding_id, event_type=event_type)
+        events, _ = self._get_filtered_finding_events(
+            finding_id=finding_id,
+            event_type=event_type,
+            occurred_after=occurred_after,
+            occurred_before=occurred_before,
+        )
         if normalized_sort_order == "desc":
             events = list(reversed(events))
         events = events[offset:]
@@ -503,6 +535,8 @@ class IAMSService:
         limit: int = 50,
         offset: int = 0,
         sort_order: str = "asc",
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
     ) -> dict:
         self._validate_limit(limit, max_limit=self.MAX_TIMELINE_PAGE_LIMIT)
         self._validate_offset(offset)
@@ -511,6 +545,8 @@ class IAMSService:
         filtered_events, normalized_event_type = self._get_filtered_finding_events(
             finding_id=finding_id,
             event_type=event_type,
+            occurred_after=occurred_after,
+            occurred_before=occurred_before,
         )
         if normalized_sort_order == "desc":
             filtered_events = list(reversed(filtered_events))
@@ -523,6 +559,8 @@ class IAMSService:
             "finding_id": finding_id,
             "event_type": normalized_event_type,
             "sort_order": normalized_sort_order,
+            "occurred_after": self._serialize_value(occurred_after),
+            "occurred_before": self._serialize_value(occurred_before),
             "offset": offset,
             "limit": limit,
             "max_limit": self.MAX_TIMELINE_PAGE_LIMIT,
