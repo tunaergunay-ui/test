@@ -8,7 +8,7 @@ This repository includes an executable starter implementation for core IAMS doma
 - Overdue finding automation
 - Due-date rescheduling workflow with authorization and overdue recovery
 - Closed/rejected findings are protected from due-date rescheduling
-- Finding-level timeline retrieval from immutable audit events (optional validated+trimmed string event-type filter from known event names, strict positive integer limit, non-negative offset, and validated datetime window filters)
+- Finding-level timeline retrieval from immutable audit events (optional validated+trimmed string event-type filter from known event names, strict positive integer limit, non-negative offset, and validated datetime window filters (datetime objects or ISO-8601 strings))
 - Timeline page API with `total`/`count` plus `has_more`/`next_offset` metadata for UI pagination (server-enforced max page size), including validated `asc`/`desc` sort order and echoed datetime window metadata
 - Immutable audit event hash chain integrity checks and strict emitted event-type allowlist guardrails (with canonical allowed-event listing support)
 - Immutable events now include structured metadata (e.g., state transitions and due-date changes) that is scalar-validated, serialized in timeline API responses, and protected by deterministic hash-chain payloads

@@ -455,41 +455,57 @@ class IAMSService:
             raise ValidationError("offset must be a non-negative integer")
 
     @staticmethod
+    def _coerce_datetime_filter(value: datetime | str | None, field_name: str) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError as exc:
+                raise ValidationError(f"{field_name} must be an ISO-8601 datetime string when provided") from exc
+        raise ValidationError(f"{field_name} must be a datetime or ISO-8601 string when provided")
+
+    @classmethod
     def _validate_time_window(
-        occurred_after: datetime | None,
-        occurred_before: datetime | None,
-    ) -> None:
-        if occurred_after is not None and not isinstance(occurred_after, datetime):
-            raise ValidationError("occurred_after must be a datetime when provided")
-        if occurred_before is not None and not isinstance(occurred_before, datetime):
-            raise ValidationError("occurred_before must be a datetime when provided")
-        if occurred_after is not None and occurred_before is not None and occurred_after > occurred_before:
+        cls,
+        occurred_after: datetime | str | None,
+        occurred_before: datetime | str | None,
+    ) -> tuple[datetime | None, datetime | None]:
+        normalized_after = cls._coerce_datetime_filter(occurred_after, "occurred_after")
+        normalized_before = cls._coerce_datetime_filter(occurred_before, "occurred_before")
+        if normalized_after is not None and normalized_before is not None and normalized_after > normalized_before:
             raise ValidationError("occurred_after cannot be later than occurred_before")
+        return normalized_after, normalized_before
 
     def _get_filtered_finding_events(
         self,
         finding_id: str,
         event_type: str | None,
-        occurred_after: datetime | None = None,
-        occurred_before: datetime | None = None,
-    ) -> tuple[List[ImmutableAuditEvent], str | None]:
+        occurred_after: datetime | str | None = None,
+        occurred_before: datetime | str | None = None,
+    ) -> tuple[List[ImmutableAuditEvent], str | None, datetime | None, datetime | None]:
         if finding_id not in self.findings:
             raise NotFoundError(f"finding_id not found: {finding_id}")
 
         normalized_event_type = self._normalize_event_type(event_type)
-        self._validate_time_window(occurred_after=occurred_after, occurred_before=occurred_before)
+        normalized_after, normalized_before = self._validate_time_window(
+            occurred_after=occurred_after,
+            occurred_before=occurred_before,
+        )
 
         events = [e for e in self.audit_events if e.aggregate_id == finding_id]
         events.sort(key=lambda e: (e.occurred_at, e.event_id))
 
-        if occurred_after is not None:
-            events = [e for e in events if e.occurred_at >= occurred_after]
-        if occurred_before is not None:
-            events = [e for e in events if e.occurred_at <= occurred_before]
+        if normalized_after is not None:
+            events = [e for e in events if e.occurred_at >= normalized_after]
+        if normalized_before is not None:
+            events = [e for e in events if e.occurred_at <= normalized_before]
 
         if normalized_event_type is None:
-            return events, None
-        return [e for e in events if e.event_type == normalized_event_type], normalized_event_type
+            return events, None, normalized_after, normalized_before
+        return [e for e in events if e.event_type == normalized_event_type], normalized_event_type, normalized_after, normalized_before
 
     @staticmethod
     def _normalize_sort_order(sort_order: str) -> str:
@@ -507,14 +523,14 @@ class IAMSService:
         limit: int | None = None,
         offset: int = 0,
         sort_order: str = "asc",
-        occurred_after: datetime | None = None,
-        occurred_before: datetime | None = None,
+        occurred_after: datetime | str | None = None,
+        occurred_before: datetime | str | None = None,
     ) -> List[dict]:
         self._validate_limit(limit)
         self._validate_offset(offset)
         normalized_sort_order = self._normalize_sort_order(sort_order)
 
-        events, _ = self._get_filtered_finding_events(
+        events, _, _, _ = self._get_filtered_finding_events(
             finding_id=finding_id,
             event_type=event_type,
             occurred_after=occurred_after,
@@ -535,14 +551,14 @@ class IAMSService:
         limit: int = 50,
         offset: int = 0,
         sort_order: str = "asc",
-        occurred_after: datetime | None = None,
-        occurred_before: datetime | None = None,
+        occurred_after: datetime | str | None = None,
+        occurred_before: datetime | str | None = None,
     ) -> dict:
         self._validate_limit(limit, max_limit=self.MAX_TIMELINE_PAGE_LIMIT)
         self._validate_offset(offset)
         normalized_sort_order = self._normalize_sort_order(sort_order)
 
-        filtered_events, normalized_event_type = self._get_filtered_finding_events(
+        filtered_events, normalized_event_type, normalized_after, normalized_before = self._get_filtered_finding_events(
             finding_id=finding_id,
             event_type=event_type,
             occurred_after=occurred_after,
@@ -559,8 +575,8 @@ class IAMSService:
             "finding_id": finding_id,
             "event_type": normalized_event_type,
             "sort_order": normalized_sort_order,
-            "occurred_after": self._serialize_value(occurred_after),
-            "occurred_before": self._serialize_value(occurred_before),
+            "occurred_after": self._serialize_value(normalized_after),
+            "occurred_before": self._serialize_value(normalized_before),
             "offset": offset,
             "limit": limit,
             "max_limit": self.MAX_TIMELINE_PAGE_LIMIT,

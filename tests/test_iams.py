@@ -382,6 +382,22 @@ class IAMSServiceTests(unittest.TestCase):
         self.assertEqual(page["occurred_before"], upper_bound.isoformat())
         self.assertEqual(page["total"], 2)
 
+    def test_finding_timeline_accepts_iso_datetime_string_filters(self):
+        self._create_active_engagement("eng-tlis")
+        self.svc.create_finding(Finding("f-tlis", "eng-tlis", "u-aud", Role.AUDITOR, "Medium", self.fixed_now + timedelta(days=10)))
+
+        self.fixed_now = self.fixed_now + timedelta(minutes=3)
+        self.svc.transition_finding("f-tlis", FindingState.VALIDATED, "u-mgr", Role.AUDIT_MANAGER)
+
+        lower_bound = self.svc.get_finding_timeline("f-tlis")[1]["occurred_at"]
+        filtered = self.svc.get_finding_timeline("f-tlis", occurred_after=lower_bound)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["event_type"], "FINDING_TRANSITIONED")
+
+        page = self.svc.get_finding_timeline_page("f-tlis", occurred_after=lower_bound)
+        self.assertEqual(page["occurred_after"], lower_bound)
+        self.assertEqual(page["total"], 1)
+
     def test_finding_timeline_rejects_invalid_filters(self):
         self._create_active_engagement("eng-tlv")
         self.svc.create_finding(Finding("f-tlv", "eng-tlv", "u-aud", Role.AUDITOR, "Low", self.fixed_now + timedelta(days=10)))
@@ -412,6 +428,9 @@ class IAMSServiceTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             self.svc.get_finding_timeline_page("f-tlv", occurred_before=123)
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline("f-tlv", occurred_after="not-a-date")
 
         with self.assertRaises(ValidationError):
             self.svc.get_finding_timeline(
