@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class Role(str, Enum):
@@ -84,5 +84,6 @@ class ImmutableAuditEvent:
     aggregate_id: str
     actor_id: str
     occurred_at: datetime = field(default_factory=datetime.utcnow)
+    metadata: dict[str, Any] = field(default_factory=dict)
     previous_hash: str = ""
     current_hash: str = ""

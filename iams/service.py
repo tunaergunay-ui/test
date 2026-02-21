@@ -99,7 +99,27 @@ class IAMSService:
     def get_allowed_finding_transitions(cls, from_state: FindingState) -> List[str]:
         return sorted(state.value for state in cls.FINDING_TRANSITIONS.get(from_state, set()))
 
-    def _append_event(self, event_type: str, aggregate_id: str, actor_id: str) -> ImmutableAuditEvent:
+    @staticmethod
+    def _serialize_event_metadata(metadata: dict[str, Any]) -> str:
+        if not metadata:
+            return ""
+        items = []
+        for key in sorted(metadata):
+            value = metadata[key]
+            if isinstance(value, datetime):
+                value = value.isoformat()
+            elif hasattr(value, "value"):
+                value = value.value
+            items.append(f"{key}={value}")
+        return "|".join(items)
+
+    def _append_event(
+        self,
+        event_type: str,
+        aggregate_id: str,
+        actor_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> ImmutableAuditEvent:
         if event_type not in self.EMITTED_AUDIT_EVENT_TYPES:
             allowed = ", ".join(self.get_allowed_timeline_event_types())
             raise ValidationError(f"event_type must be one of: {allowed}")
@@ -109,9 +129,11 @@ class IAMSService:
             aggregate_id=aggregate_id,
             actor_id=actor_id,
             occurred_at=self._now(),
+            metadata=metadata or {},
         )
         previous_hash = self.audit_events[-1].current_hash if self.audit_events else "GENESIS"
-        payload = f"{event.event_id}|{event.event_type}|{event.aggregate_id}|{event.actor_id}|{event.occurred_at.isoformat()}|{previous_hash}"
+        metadata_payload = self._serialize_event_metadata(event.metadata)
+        payload = f"{event.event_id}|{event.event_type}|{event.aggregate_id}|{event.actor_id}|{event.occurred_at.isoformat()}|{metadata_payload}|{previous_hash}"
         event.previous_hash = previous_hash
         event.current_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         self.audit_events.append(event)
@@ -181,8 +203,14 @@ class IAMSService:
             if actor_role not in {Role.AUDIT_MANAGER, Role.CAE}:
                 raise AuthorizationError("Only manager/CAE can move DRAFT to PLANNED.")
 
+        previous_state = engagement.state
         engagement.state = to_state
-        self._append_event("ENGAGEMENT_TRANSITIONED", engagement_id, actor_id)
+        self._append_event(
+            "ENGAGEMENT_TRANSITIONED",
+            engagement_id,
+            actor_id,
+            metadata={"from_state": previous_state, "to_state": to_state},
+        )
         return engagement
 
     @classmethod
@@ -238,10 +266,16 @@ class IAMSService:
         if to_state == FindingState.IN_REMEDIATION and not self._has_remediation_plan(finding):
             raise WorkflowError("Cannot enter IN_REMEDIATION without assigned action plan, owner, and due date.")
 
+        previous_state = finding.state
         finding.state = to_state
         if to_state == FindingState.CLOSED:
             finding.final_approved_by = actor_id
-        self._append_event("FINDING_TRANSITIONED", finding_id, actor_id)
+        self._append_event(
+            "FINDING_TRANSITIONED",
+            finding_id,
+            actor_id,
+            metadata={"from_state": previous_state, "to_state": to_state},
+        )
         return finding
 
     def assign_finding_action_plan(
@@ -272,7 +306,12 @@ class IAMSService:
         finding.action_plan = action_plan
         finding.action_owner = action_owner
         finding.action_due_date = action_due_date
-        self._append_event("FINDING_ACTION_PLAN_ASSIGNED", finding_id, actor_id)
+        self._append_event(
+            "FINDING_ACTION_PLAN_ASSIGNED",
+            finding_id,
+            actor_id,
+            metadata={"action_owner": action_owner, "action_due_date": action_due_date},
+        )
         return finding
 
     def reschedule_finding_due_date(
@@ -294,10 +333,16 @@ class IAMSService:
         if finding.action_due_date and new_due_date < finding.action_due_date:
             raise ValidationError("new_due_date cannot be earlier than action_due_date")
 
+        old_due_date = finding.due_date
         finding.due_date = new_due_date
         if finding.state == FindingState.OVERDUE:
             finding.state = FindingState.IN_REMEDIATION
-        self._append_event("FINDING_DUE_DATE_RESCHEDULED", finding_id, actor_id)
+        self._append_event(
+            "FINDING_DUE_DATE_RESCHEDULED",
+            finding_id,
+            actor_id,
+            metadata={"old_due_date": old_due_date, "new_due_date": new_due_date},
+        )
         return finding
 
     def mark_overdue_findings(self, now: datetime, actor_id: str = "system") -> int:
@@ -306,15 +351,22 @@ class IAMSService:
             if finding.state in {FindingState.CLOSED, FindingState.REJECTED, FindingState.OVERDUE}:
                 continue
             if finding.due_date < now and finding.state in {FindingState.AGREED_ACTION, FindingState.IN_REMEDIATION}:
+                previous_state = finding.state
                 finding.state = FindingState.OVERDUE
                 transitioned += 1
-                self._append_event("FINDING_OVERDUE", finding.finding_id, actor_id)
+                self._append_event(
+                    "FINDING_OVERDUE",
+                    finding.finding_id,
+                    actor_id,
+                    metadata={"from_state": previous_state, "to_state": FindingState.OVERDUE},
+                )
         return transitioned
 
     def get_audit_chain_valid(self) -> bool:
         prev = "GENESIS"
         for event in self.audit_events:
-            payload = f"{event.event_id}|{event.event_type}|{event.aggregate_id}|{event.actor_id}|{event.occurred_at.isoformat()}|{prev}"
+            metadata_payload = self._serialize_event_metadata(event.metadata)
+            payload = f"{event.event_id}|{event.event_type}|{event.aggregate_id}|{event.actor_id}|{event.occurred_at.isoformat()}|{metadata_payload}|{prev}"
             current = hashlib.sha256(payload.encode("utf-8")).hexdigest()
             if event.previous_hash != prev or event.current_hash != current:
                 return False

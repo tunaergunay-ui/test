@@ -485,6 +485,34 @@ class IAMSServiceTests(unittest.TestCase):
                 limit=self.svc.MAX_TIMELINE_PAGE_LIMIT + 1,
             )
 
+
+    def test_transition_events_include_state_metadata(self):
+        self.svc.create_engagement(Engagement("eng-meta", "ent-1", "u-aud", Role.AUDITOR))
+        self.svc.transition_engagement("eng-meta", EngagementState.PLANNED, "u-mgr", Role.AUDIT_MANAGER)
+
+        event = self.svc.audit_events[-1]
+        self.assertEqual(event.event_type, "ENGAGEMENT_TRANSITIONED")
+        self.assertEqual(event.metadata["from_state"], EngagementState.DRAFT)
+        self.assertEqual(event.metadata["to_state"], EngagementState.PLANNED)
+
+
+    def test_timeline_serializes_event_metadata(self):
+        self._create_active_engagement("eng-meta-f")
+        self.svc.create_finding(Finding("f-meta", "eng-meta-f", "u-aud", Role.AUDITOR, "High", self.fixed_now + timedelta(days=10)))
+        self.svc.transition_finding("f-meta", FindingState.VALIDATED, "u-mgr", Role.AUDIT_MANAGER)
+
+        timeline = self.svc.get_finding_timeline("f-meta", event_type="FINDING_TRANSITIONED")
+        self.assertEqual(len(timeline), 1)
+        self.assertEqual(timeline[0]["metadata"]["from_state"], "OPEN")
+        self.assertEqual(timeline[0]["metadata"]["to_state"], "VALIDATED")
+
+    def test_audit_chain_detects_metadata_tampering(self):
+        self.svc.create_engagement(Engagement("eng-chain", "ent-1", "u-aud", Role.AUDITOR))
+        self.svc.transition_engagement("eng-chain", EngagementState.PLANNED, "u-mgr", Role.AUDIT_MANAGER)
+        self.assertTrue(self.svc.get_audit_chain_valid())
+
+        self.svc.audit_events[-1].metadata["to_state"] = "TAMPERED"
+        self.assertFalse(self.svc.get_audit_chain_valid())
     def test_transition_helpers_return_sorted_state_values(self):
         engagement_allowed = self.svc.get_allowed_engagement_transitions(EngagementState.IN_FIELDWORK)
         self.assertEqual(engagement_allowed, ["REVIEW_PENDING"])
