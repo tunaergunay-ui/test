@@ -341,7 +341,7 @@ class IAMSService:
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValidationError("offset must be a non-negative integer")
 
-    def _get_filtered_finding_events(self, finding_id: str, event_type: str | None) -> List[ImmutableAuditEvent]:
+    def _get_filtered_finding_events(self, finding_id: str, event_type: str | None) -> tuple[List[ImmutableAuditEvent], str | None]:
         if finding_id not in self.findings:
             raise NotFoundError(f"finding_id not found: {finding_id}")
 
@@ -350,11 +350,13 @@ class IAMSService:
         events.sort(key=lambda e: (e.occurred_at, e.event_id))
 
         if normalized_event_type is None:
-            return events
-        return [e for e in events if e.event_type == normalized_event_type]
+            return events, None
+        return [e for e in events if e.event_type == normalized_event_type], normalized_event_type
 
     @staticmethod
     def _normalize_sort_order(sort_order: str) -> str:
+        if not isinstance(sort_order, str):
+            raise ValidationError("sort_order must be a string: 'asc' or 'desc'")
         normalized_sort_order = sort_order.strip().lower()
         if normalized_sort_order not in {"asc", "desc"}:
             raise ValidationError("sort_order must be either 'asc' or 'desc'")
@@ -372,7 +374,7 @@ class IAMSService:
         self._validate_offset(offset)
         normalized_sort_order = self._normalize_sort_order(sort_order)
 
-        events = self._get_filtered_finding_events(finding_id=finding_id, event_type=event_type)
+        events, _ = self._get_filtered_finding_events(finding_id=finding_id, event_type=event_type)
         if normalized_sort_order == "desc":
             events = list(reversed(events))
         events = events[offset:]
@@ -391,12 +393,11 @@ class IAMSService:
     ) -> dict:
         self._validate_limit(limit, max_limit=self.MAX_TIMELINE_PAGE_LIMIT)
         self._validate_offset(offset)
-        normalized_event_type = self._normalize_event_type(event_type)
         normalized_sort_order = self._normalize_sort_order(sort_order)
 
-        filtered_events = self._get_filtered_finding_events(
+        filtered_events, normalized_event_type = self._get_filtered_finding_events(
             finding_id=finding_id,
-            event_type=normalized_event_type,
+            event_type=event_type,
         )
         if normalized_sort_order == "desc":
             filtered_events = list(reversed(filtered_events))

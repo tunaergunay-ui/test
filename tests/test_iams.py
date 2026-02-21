@@ -427,6 +427,12 @@ class IAMSServiceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.svc.get_finding_timeline_page("f-tlsv", sort_order=" ")
 
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline("f-tlsv", sort_order=None)
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline_page("f-tlsv", sort_order=True)
+
     def test_finding_timeline_page_reuses_timeline_validations(self):
         self._create_active_engagement("eng-tlpv")
         self.svc.create_finding(Finding("f-tlpv", "eng-tlpv", "u-aud", Role.AUDITOR, "Medium", self.fixed_now + timedelta(days=9)))
