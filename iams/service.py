@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List
 
@@ -455,14 +455,20 @@ class IAMSService:
             raise ValidationError("offset must be a non-negative integer")
 
     @staticmethod
+    def _normalize_utc_naive(value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
     def _coerce_datetime_filter(value: datetime | str | None, field_name: str) -> datetime | None:
         if value is None:
             return None
         if isinstance(value, datetime):
-            return value
+            return IAMSService._normalize_utc_naive(value)
         if isinstance(value, str):
             try:
-                return datetime.fromisoformat(value)
+                return IAMSService._normalize_utc_naive(datetime.fromisoformat(value))
             except ValueError as exc:
                 raise ValidationError(f"{field_name} must be an ISO-8601 datetime string when provided") from exc
         raise ValidationError(f"{field_name} must be a datetime or ISO-8601 string when provided")
@@ -499,9 +505,13 @@ class IAMSService:
         events.sort(key=lambda e: (e.occurred_at, e.event_id))
 
         if normalized_after is not None:
-            events = [e for e in events if e.occurred_at >= normalized_after]
+            events = [
+                e for e in events if self._normalize_utc_naive(e.occurred_at) >= normalized_after
+            ]
         if normalized_before is not None:
-            events = [e for e in events if e.occurred_at <= normalized_before]
+            events = [
+                e for e in events if self._normalize_utc_naive(e.occurred_at) <= normalized_before
+            ]
 
         if normalized_event_type is None:
             return events, None, normalized_after, normalized_before

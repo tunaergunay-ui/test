@@ -398,6 +398,18 @@ class IAMSServiceTests(unittest.TestCase):
         self.assertEqual(page["occurred_after"], lower_bound)
         self.assertEqual(page["total"], 1)
 
+    def test_finding_timeline_accepts_timezone_offset_string_filters(self):
+        self._create_active_engagement("eng-tltz")
+        self.svc.create_finding(Finding("f-tltz", "eng-tltz", "u-aud", Role.AUDITOR, "Medium", self.fixed_now + timedelta(days=10)))
+
+        self.fixed_now = self.fixed_now + timedelta(minutes=3)
+        self.svc.transition_finding("f-tltz", FindingState.VALIDATED, "u-mgr", Role.AUDIT_MANAGER)
+
+        lower_bound = self.svc.get_finding_timeline("f-tltz")[1]["occurred_at"] + "+00:00"
+        filtered = self.svc.get_finding_timeline("f-tltz", occurred_after=lower_bound)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["event_type"], "FINDING_TRANSITIONED")
+
     def test_finding_timeline_rejects_invalid_filters(self):
         self._create_active_engagement("eng-tlv")
         self.svc.create_finding(Finding("f-tlv", "eng-tlv", "u-aud", Role.AUDITOR, "Low", self.fixed_now + timedelta(days=10)))
