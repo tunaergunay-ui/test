@@ -344,6 +344,12 @@ class IAMSServiceTests(unittest.TestCase):
             self.svc.get_finding_timeline_page("f-tlv", event_type=123)
 
         with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline("f-tlv", event_type="FINDING_UNKNOWN")
+
+        with self.assertRaises(ValidationError):
+            self.svc.get_finding_timeline_page("f-tlv", event_type="FINDING_UNKNOWN")
+
+        with self.assertRaises(ValidationError):
             self.svc.get_finding_timeline("f-tlv", limit=0)
 
         with self.assertRaises(ValidationError):

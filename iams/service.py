@@ -46,6 +46,17 @@ class IAMSService:
         EngagementState.FOLLOW_UP,
     }
     MAX_TIMELINE_PAGE_LIMIT = 200
+    ALLOWED_TIMELINE_EVENT_TYPES = {
+        "RISK_CREATED",
+        "RISK_SCORED",
+        "ENGAGEMENT_CREATED",
+        "ENGAGEMENT_TRANSITIONED",
+        "FINDING_CREATED",
+        "FINDING_TRANSITIONED",
+        "FINDING_ACTION_PLAN_ASSIGNED",
+        "FINDING_DUE_DATE_RESCHEDULED",
+        "FINDING_OVERDUE",
+    }
 
     def __init__(self, now_provider: Callable[[], datetime] | None = None) -> None:
         self.risks: Dict[str, Risk] = {}
@@ -318,8 +329,8 @@ class IAMSService:
             return [self._serialize_value(v) for v in value]
         return value
 
-    @staticmethod
-    def _normalize_event_type(event_type: str | None) -> str | None:
+    @classmethod
+    def _normalize_event_type(cls, event_type: str | None) -> str | None:
         if event_type is None:
             return None
         if not isinstance(event_type, str):
@@ -327,6 +338,9 @@ class IAMSService:
         normalized_event_type = event_type.strip()
         if not normalized_event_type:
             raise ValidationError("event_type cannot be blank when provided")
+        if normalized_event_type not in cls.ALLOWED_TIMELINE_EVENT_TYPES:
+            allowed = ", ".join(sorted(cls.ALLOWED_TIMELINE_EVENT_TYPES))
+            raise ValidationError(f"event_type must be one of: {allowed}")
         return normalized_event_type
 
     @staticmethod
