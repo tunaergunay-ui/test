@@ -50,6 +50,15 @@ class IAMSServiceTests(unittest.TestCase):
         self.svc.transition_engagement("eng-1", EngagementState.PLANNED, "u-mgr", Role.AUDIT_MANAGER)
         self.assertEqual(self.svc.engagements["eng-1"].state, EngagementState.PLANNED)
 
+    def test_invalid_engagement_transition_includes_allowed_states(self):
+        self._create_active_engagement("eng-invalid")
+        with self.assertRaises(WorkflowError) as ctx:
+            self.svc.transition_engagement("eng-invalid", EngagementState.CLOSED, "u-mgr", Role.AUDIT_MANAGER)
+
+        msg = str(ctx.exception)
+        self.assertIn("IN_FIELDWORK -> CLOSED", msg)
+        self.assertIn("REVIEW_PENDING", msg)
+
     def test_create_finding_requires_valid_engagement_and_due_date(self):
         with self.assertRaises(NotFoundError):
             self.svc.create_finding(
@@ -208,6 +217,18 @@ class IAMSServiceTests(unittest.TestCase):
                 actor_id="u-mgr",
                 actor_role=Role.AUDIT_MANAGER,
             )
+
+    def test_invalid_finding_transition_includes_allowed_states(self):
+        self._create_active_engagement("eng-ft")
+        self.svc.create_finding(Finding("f-ft", "eng-ft", "u-aud", Role.AUDITOR, "High", self.fixed_now + timedelta(days=10)))
+
+        with self.assertRaises(WorkflowError) as ctx:
+            self.svc.transition_finding("f-ft", FindingState.CLOSED, "u-mgr", Role.AUDIT_MANAGER)
+
+        msg = str(ctx.exception)
+        self.assertIn("OPEN -> CLOSED", msg)
+        self.assertIn("VALIDATED", msg)
+        self.assertIn("REJECTED", msg)
 
     def test_in_remediation_requires_assigned_action_plan(self):
         self._create_active_engagement("eng-rem")
@@ -463,6 +484,13 @@ class IAMSServiceTests(unittest.TestCase):
                 "f-tlpv",
                 limit=self.svc.MAX_TIMELINE_PAGE_LIMIT + 1,
             )
+
+    def test_transition_helpers_return_sorted_state_values(self):
+        engagement_allowed = self.svc.get_allowed_engagement_transitions(EngagementState.IN_FIELDWORK)
+        self.assertEqual(engagement_allowed, ["REVIEW_PENDING"])
+
+        finding_allowed = self.svc.get_allowed_finding_transitions(FindingState.OPEN)
+        self.assertEqual(finding_allowed, ["REJECTED", "VALIDATED"])
 
     def test_allowed_timeline_event_types_are_sorted_and_stable(self):
         allowed = self.svc.get_allowed_timeline_event_types()

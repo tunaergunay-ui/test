@@ -3,7 +3,7 @@
 This repository includes an executable starter implementation for core IAMS domain logic:
 
 - Risk scoring (inherent/residual + rating bands)
-- Engagement lifecycle state transitions with authorization guards
+- Engagement/finding lifecycle state transitions with authorization guards and allowed-next-state workflow error guidance
 - Finding lifecycle with SoD enforcement
 - Overdue finding automation
 - Due-date rescheduling workflow with authorization and overdue recovery

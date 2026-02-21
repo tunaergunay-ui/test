@@ -60,6 +60,22 @@ class IAMSService:
         }
     )
     ALLOWED_TIMELINE_EVENT_TYPES = EMITTED_AUDIT_EVENT_TYPES
+    ENGAGEMENT_TRANSITIONS = {
+        EngagementState.DRAFT: {EngagementState.PLANNED},
+        EngagementState.PLANNED: {EngagementState.IN_FIELDWORK},
+        EngagementState.IN_FIELDWORK: {EngagementState.REVIEW_PENDING},
+        EngagementState.REVIEW_PENDING: {EngagementState.REPORTED},
+        EngagementState.REPORTED: {EngagementState.FOLLOW_UP},
+        EngagementState.FOLLOW_UP: {EngagementState.CLOSED},
+    }
+    FINDING_TRANSITIONS = {
+        FindingState.OPEN: {FindingState.VALIDATED, FindingState.REJECTED},
+        FindingState.VALIDATED: {FindingState.AGREED_ACTION},
+        FindingState.AGREED_ACTION: {FindingState.IN_REMEDIATION, FindingState.OVERDUE},
+        FindingState.IN_REMEDIATION: {FindingState.RETEST, FindingState.OVERDUE},
+        FindingState.RETEST: {FindingState.CLOSED},
+        FindingState.OVERDUE: {FindingState.IN_REMEDIATION},
+    }
 
     def __init__(self, now_provider: Callable[[], datetime] | None = None) -> None:
         self.risks: Dict[str, Risk] = {}
@@ -74,6 +90,14 @@ class IAMSService:
     @classmethod
     def get_allowed_timeline_event_types(cls) -> List[str]:
         return sorted(cls.ALLOWED_TIMELINE_EVENT_TYPES)
+
+    @classmethod
+    def get_allowed_engagement_transitions(cls, from_state: EngagementState) -> List[str]:
+        return sorted(state.value for state in cls.ENGAGEMENT_TRANSITIONS.get(from_state, set()))
+
+    @classmethod
+    def get_allowed_finding_transitions(cls, from_state: FindingState) -> List[str]:
+        return sorted(state.value for state in cls.FINDING_TRANSITIONS.get(from_state, set()))
 
     def _append_event(self, event_type: str, aggregate_id: str, actor_id: str) -> ImmutableAuditEvent:
         if event_type not in self.EMITTED_AUDIT_EVENT_TYPES:
@@ -146,16 +170,12 @@ class IAMSService:
         engagement = self.engagements.get(engagement_id)
         if engagement is None:
             raise NotFoundError(f"engagement_id not found: {engagement_id}")
-        allowed = {
-            EngagementState.DRAFT: {EngagementState.PLANNED},
-            EngagementState.PLANNED: {EngagementState.IN_FIELDWORK},
-            EngagementState.IN_FIELDWORK: {EngagementState.REVIEW_PENDING},
-            EngagementState.REVIEW_PENDING: {EngagementState.REPORTED},
-            EngagementState.REPORTED: {EngagementState.FOLLOW_UP},
-            EngagementState.FOLLOW_UP: {EngagementState.CLOSED},
-        }
-        if to_state not in allowed.get(engagement.state, set()):
-            raise WorkflowError(f"Invalid engagement transition: {engagement.state} -> {to_state}")
+        if to_state not in self.ENGAGEMENT_TRANSITIONS.get(engagement.state, set()):
+            allowed = self.get_allowed_engagement_transitions(engagement.state)
+            raise WorkflowError(
+                f"Invalid engagement transition: {engagement.state.value} -> {to_state.value}. "
+                f"Allowed: {allowed or 'none'}"
+            )
 
         if engagement.state == EngagementState.DRAFT and to_state == EngagementState.PLANNED:
             if actor_role not in {Role.AUDIT_MANAGER, Role.CAE}:
@@ -201,16 +221,12 @@ class IAMSService:
         finding = self.findings.get(finding_id)
         if finding is None:
             raise NotFoundError(f"finding_id not found: {finding_id}")
-        allowed = {
-            FindingState.OPEN: {FindingState.VALIDATED, FindingState.REJECTED},
-            FindingState.VALIDATED: {FindingState.AGREED_ACTION},
-            FindingState.AGREED_ACTION: {FindingState.IN_REMEDIATION, FindingState.OVERDUE},
-            FindingState.IN_REMEDIATION: {FindingState.RETEST, FindingState.OVERDUE},
-            FindingState.RETEST: {FindingState.CLOSED},
-            FindingState.OVERDUE: {FindingState.IN_REMEDIATION},
-        }
-        if to_state not in allowed.get(finding.state, set()):
-            raise WorkflowError(f"Invalid finding transition: {finding.state} -> {to_state}")
+        if to_state not in self.FINDING_TRANSITIONS.get(finding.state, set()):
+            allowed = self.get_allowed_finding_transitions(finding.state)
+            raise WorkflowError(
+                f"Invalid finding transition: {finding.state.value} -> {to_state.value}. "
+                f"Allowed: {allowed or 'none'}"
+            )
 
         if to_state == FindingState.CLOSED and actor_role not in {Role.AUDIT_MANAGER, Role.CAE}:
             raise AuthorizationError("Only manager/CAE may close a finding.")
