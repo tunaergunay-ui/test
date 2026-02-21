@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any, Callable, Dict, List
 
 from .domain import (
@@ -100,18 +102,34 @@ class IAMSService:
         return sorted(state.value for state in cls.FINDING_TRANSITIONS.get(from_state, set()))
 
     @staticmethod
-    def _serialize_event_metadata(metadata: dict[str, Any]) -> str:
-        if not metadata:
-            return ""
-        items = []
-        for key in sorted(metadata):
-            value = metadata[key]
+    def _normalize_event_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+        if metadata is None:
+            return {}
+        if not isinstance(metadata, dict):
+            raise ValidationError("metadata must be a dictionary when provided")
+
+        normalized: dict[str, Any] = {}
+        for key, value in metadata.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValidationError("metadata keys must be non-blank strings")
+
             if isinstance(value, datetime):
-                value = value.isoformat()
-            elif hasattr(value, "value"):
-                value = value.value
-            items.append(f"{key}={value}")
-        return "|".join(items)
+                normalized_value: Any = value.isoformat()
+            elif isinstance(value, Enum):
+                normalized_value = value.value
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                normalized_value = value
+            else:
+                raise ValidationError(
+                    "metadata values must be scalar (str, int, float, bool, datetime, enum)"
+                )
+
+            normalized[key] = normalized_value
+        return normalized
+
+    @staticmethod
+    def _serialize_event_metadata(metadata: dict[str, Any]) -> str:
+        return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
 
     def _append_event(
         self,
@@ -123,13 +141,14 @@ class IAMSService:
         if event_type not in self.EMITTED_AUDIT_EVENT_TYPES:
             allowed = ", ".join(self.get_allowed_timeline_event_types())
             raise ValidationError(f"event_type must be one of: {allowed}")
+        normalized_metadata = self._normalize_event_metadata(metadata)
         event = ImmutableAuditEvent(
             event_id=f"evt-{len(self.audit_events)+1}",
             event_type=event_type,
             aggregate_id=aggregate_id,
             actor_id=actor_id,
             occurred_at=self._now(),
-            metadata=metadata or {},
+            metadata=normalized_metadata,
         )
         previous_hash = self.audit_events[-1].current_hash if self.audit_events else "GENESIS"
         metadata_payload = self._serialize_event_metadata(event.metadata)

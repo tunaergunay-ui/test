@@ -492,8 +492,8 @@ class IAMSServiceTests(unittest.TestCase):
 
         event = self.svc.audit_events[-1]
         self.assertEqual(event.event_type, "ENGAGEMENT_TRANSITIONED")
-        self.assertEqual(event.metadata["from_state"], EngagementState.DRAFT)
-        self.assertEqual(event.metadata["to_state"], EngagementState.PLANNED)
+        self.assertEqual(event.metadata["from_state"], "DRAFT")
+        self.assertEqual(event.metadata["to_state"], "PLANNED")
 
 
     def test_timeline_serializes_event_metadata(self):
@@ -525,6 +525,32 @@ class IAMSServiceTests(unittest.TestCase):
         self.assertEqual(allowed, sorted(allowed))
         self.assertIn("FINDING_CREATED", allowed)
 
+
+    def test_append_event_metadata_validation(self):
+        with self.assertRaises(ValidationError):
+            self.svc._append_event("RISK_CREATED", "agg-1", "u-system", metadata="bad")
+
+        with self.assertRaises(ValidationError):
+            self.svc._append_event("RISK_CREATED", "agg-1", "u-system", metadata={"": "x"})
+
+        with self.assertRaises(ValidationError):
+            self.svc._append_event("RISK_CREATED", "agg-1", "u-system", metadata={"k": object()})
+
+    def test_append_event_metadata_hash_is_key_order_independent(self):
+        event_one = self.svc._append_event(
+            "RISK_CREATED",
+            "agg-1",
+            "u-system",
+            metadata={"b": "two", "a": "one"},
+        )
+        self.svc.audit_events.clear()
+        event_two = self.svc._append_event(
+            "RISK_CREATED",
+            "agg-1",
+            "u-system",
+            metadata={"a": "one", "b": "two"},
+        )
+        self.assertEqual(event_one.current_hash, event_two.current_hash)
     def test_append_event_rejects_unknown_event_type(self):
         with self.assertRaises(ValidationError):
             self.svc._append_event("UNKNOWN_EVENT", "agg-1", "u-system")
